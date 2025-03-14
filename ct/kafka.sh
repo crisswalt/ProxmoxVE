@@ -27,17 +27,21 @@ function update_script() {
     msg_error "No ${APP} Installation Found!"
     exit
   fi
-  RELEASE=$(curl -s https://downloads.apache.org/kafka/ | grep -oP 'kafka-\K[\d.]+(?=/)' | sort -V | tail -n 1)
+  echo https://api.github.com/repos/apache/kafka/releases/latest
+  RELEASE=$(curl -s https://downloads.apache.org/kafka/ | grep 'folder' | awk -F '>' '{print $3}' | sed 's/\/.*//' | sort -V | tail -n 1)
   if [[ "${RELEASE}" != "$(cat /opt/${APP}_version.txt 2>/dev/null)" ]]; then
     msg_info "Stopping ${APP}"
     systemctl stop kafka zookeeper
     msg_ok "${APP} Stopped"
     
     msg_info "Updating ${APP} to ${RELEASE}"
-    wget -q https://downloads.apache.org/kafka/${RELEASE}/kafka_${RELEASE}.tgz -O /tmp/kafka.tgz
-    tar -xzf /tmp/kafka.tgz -C /opt/
-    mv /opt/kafka_${RELEASE} /opt/kafka
-    rm -f /tmp/kafka.tgz
+
+    DIST=$(curl -s https://downloads.apache.org/kafka/${RELEASE}/ | grep compressed | grep ${RELEASE}.tgz | awk -F '"' '{print $6}' | sort -V | tail -n 1 | sed 's/\.tgz//')
+
+    wget -q https://downloads.apache.org/kafka/${RELEASE}/${DIST}.tgz -O /tmp/${DIST}.tgz
+    tar -xzf /tmp/${DIST}.tgz -C /opt/
+    ln -s /opt/${DIST} /opt/kafka
+    rm -f /tmp/${DIST}.tgz 
     echo "${RELEASE}" > /opt/${APP}_version.txt
     msg_ok "Updated ${APP}"
 
@@ -52,77 +56,6 @@ function update_script() {
 
 start
 build_container
-
-msg_info "Installing Java"
-apt update -qq
-apt install -y openjdk-17-jre-headless
-msg_ok "Java Installed"
-
-msg_info "Downloading and Installing Kafka"
-RELEASE=$(curl -s https://downloads.apache.org/kafka/ | grep -oP 'kafka-\K[\d.]+(?=/)' | sort -V | tail -n 1)
-wget -q https://downloads.apache.org/kafka/${RELEASE}/kafka_${RELEASE}.tgz -O /tmp/kafka.tgz
-tar -xzf /tmp/kafka.tgz -C /opt/
-mv /opt/kafka_${RELEASE} /opt/kafka
-rm -f /tmp/kafka.tgz
-msg_ok "Kafka Installed"
-
-echo "${RELEASE}" > /opt/${APP}_version.txt
-
-msg_info "Configuring Zookeeper"
-cat <<EOF > /opt/kafka/config/zookeeper.properties
-clientPort=2181
-dataDir=/var/lib/zookeeper
-tickTime=2000
-EOF
-mkdir -p /var/lib/zookeeper
-msg_ok "Zookeeper Configured"
-
-msg_info "Configuring Kafka"
-cat <<EOF > /opt/kafka/config/server.properties
-broker.id=1
-listeners=PLAINTEXT://:9092
-log.dirs=/var/lib/kafka-logs
-zookeeper.connect=localhost:2181
-num.partitions=1
-log.retention.hours=168
-default.replication.factor=1
-EOF
-mkdir -p /var/lib/kafka-logs
-msg_ok "Kafka Configured"
-
-msg_info "Creating systemd services"
-cat <<EOF > /etc/systemd/system/zookeeper.service
-[Unit]
-Description=Apache Zookeeper server
-After=network.target
-
-[Service]
-ExecStart=/opt/kafka/bin/zookeeper-server-start.sh /opt/kafka/config/zookeeper.properties
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat <<EOF > /etc/systemd/system/kafka.service
-[Unit]
-Description=Apache Kafka server
-After=zookeeper.service
-
-[Service]
-ExecStart=/opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/server.properties
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable --now zookeeper kafka
-msg_ok "Services Created and Started"
-
 description
 
 msg_ok "Completed Successfully!\n"
